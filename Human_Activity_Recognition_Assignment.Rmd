@@ -1,0 +1,76 @@
+---
+title: "Human Activity Recognition Assignment"
+author: "Anindito De"
+date: "31 January 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+```
+
+## Objective of the Assignment
+Objective of the assignment is to predict the manner in which an activity is performed based on different data points collected from the fitness monitor devices. 
+
+# Data collection and preprocessing
+The pml-training.csv dataset is read into a dataframe. The following pre-processing steps are done.
+
+1. It is oberved that the data set contains many occurences of blank strings apart from NA for missing values. Hence both blank and NA are considered as missing values.
+
+2. Out of 160 columns in the dataframe, about a 100 contain missing values in more than 90% of the rows. These are not considered as useful for prediction and removed for subsequent analysis.
+
+3. The first 7 columns in the dataset mostly contain serial numbers, user names, time stamp etc. variables which are not considered useful for predicting the activity class. These are also excluded from further processing.
+
+4. The dataset is split in 60:40 ratio for training and testing. 
+
+5. Principal Component Analysis is done with 10 principal components for reducing the dataset for Random Forest model fit.
+
+```{r preprocessing, echo = TRUE, cache=TRUE, results='hide'}
+#Reading the training dataset
+pml_training <- read.csv("pml-training.csv", na.strings = c("NA",""))
+#Using 60% of the data for training and 40% for testing
+inTrain <- createDataPartition(y=pml_training$classe, p=0.60, list=FALSE)
+training <- pml_training[inTrain,]
+dim(training)
+summary (training)
+colMeans(is.na(training))
+#Removing columns with 90% or more missing values 
+training_remove_missing <- training[, colMeans(is.na(training)) < 0.9]
+dim(training_remove_missing)
+#Creating PCA matrix for first 10 principal components
+preProc <- preProcess(training_remove_missing[,8:59],method="pca",pcaComp=10)
+trainPC <- predict(preProc,training_remove_missing[,8:59])
+trainPC <- cbind(trainPC, training_remove_missing$classe)
+colnames(trainPC)[11] <- "classe"
+```
+
+# Random Forest Model
+A Random Forest model is constructed on the principal component matrix, using Cross Validation option, by setting method as rfcv with 5 folds. Random Forest is chosen as this is a classification problem with large number of variables. However the model yields high out of sample error with 31.37% accuracy in the test dataset. Hence this model is rejected.
+
+```{r Random Forest, echo = TRUE, cache=TRUE}
+#Building the Random Forest with Cross Validation
+modelFit <- train(classe ~ ., method = "rf", data = trainPC, trControl = trainControl(method = "cv"), number = 5)
+modelFit$results
+
+#Preprocessing the test dataset
+testing <- pml_training[-inTrain,]
+testing_remove_missing <- testing[, colMeans(is.na(training)) < 0.9]
+preProc_test <- preProcess(testing_remove_missing[,8:59],method="pca",pcaComp=10)
+testPC <- predict(preProc_test,testing_remove_missing[,8:59])
+
+#Testing the test PCA dataset with the Random Forest model
+test_classe <- predict(modelFit,newdata = testPC)
+confusionMatrix(testing_remove_missing$classe, test_classe)
+```
+
+# Gradient Boosting Model
+A GBM Model is then fitted on the training dataset. This yields much better accuracy of 96.21% and thus low out of sample error error when used on the validation dataset and hence is considered as a good fit and as the final model. It predicts 20 out of 20 records in the validation set correctly.
+
+```{r Gradient Boosting Model, echo = TRUE, cache=TRUE}
+#Building the GBM
+modelFit_GBM <- train(classe ~ ., method = "gbm", data = training_remove_missing[8:60], verbose = FALSE)
+testing_classe <- predict (modelFit_GBM, newdata = testing_remove_missing[8:59])
+table(testing_classe, testing_remove_missing$classe)
+confusionMatrix(testing_classe, testing_remove_missing$classe)
+```
